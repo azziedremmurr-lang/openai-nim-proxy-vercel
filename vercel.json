@@ -1,10 +1,12 @@
 {
   "rewrites": [
+    { "source": "/", "destination": "/api/health" },
     { "source": "/v1/chat/completions", "destination": "/api/chat" },
     { "source": "/chat/completions", "destination": "/api/chat" },
+    { "source": "/v1/completions", "destination": "/api/completions" },
+    { "source": "/completions", "destination": "/api/completions" },
     { "source": "/v1/models", "destination": "/api/models" },
     { "source": "/models", "destination": "/api/models" },
-    { "source": "/health", "destination": "/api/health" },
-    { "source": "/", "destination": "/api/health" }
+    { "source": "/health", "destination": "/api/health" }
   ]
 }
