@@ -1,17 +1,18 @@
-// api/chat.js - OpenAI to NVIDIA NIM API Proxy (Vercel Serverless)
+// api/chat.js - OpenAI to NVIDIA NIM API Proxy (Railway-Compatible for Vercel)
 const axios = require('axios');
+const { parse: parseQuery } = require('querystring');
 
 // NVIDIA NIM API configuration
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY = process.env.NIM_API_KEY;
 
-// 🔥 REASONING DISPLAY TOGGLE - Shows/hides reasoning in output
-const SHOW_REASONING = true; // Set to true to show reasoning with <think> tags
+// 🔥 REASONING DISPLAY TOGGLE
+const SHOW_REASONING = false;
 
-// 🔥 THINKING MODE TOGGLE - Enables thinking for specific models that support it
-const ENABLE_THINKING_MODE = false; // Set to true to enable chat_template_kwargs thinking parameter
+// 🔥 THINKING MODE TOGGLE
+const ENABLE_THINKING_MODE = false;
 
-// Model mapping (adjust based on available NIM models)
+// Model mapping
 const MODEL_MAPPING = {
   'gpt-3.5-turbo': 'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'gpt-4': 'qwen/qwen3-coder-480b-a35b-instruct',
@@ -19,36 +20,102 @@ const MODEL_MAPPING = {
   'gpt-4o': 'deepseek-ai/deepseek-v3.1',
   'claude-3-opus': 'openai/gpt-oss-120b',
   'claude-3-sonnet': 'openai/gpt-oss-20b',
-  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking',
-  'deepseek-3.2': 'deepseek-ai/deepseek-v3.2'
+  'gemini-pro': 'qwen/qwen3-next-80b-a3b-thinking' 
 };
 
+// Parse request body like Express.js does
+async function parseRequestBody(req) {
+  const contentType = (req.headers['content-type'] || '').toLowerCase();
+  
+  // Already parsed by Vercel (application/json)
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    return req.body;
+  }
+  
+  // Handle raw buffer/string body
+  let rawBody = req.body;
+  
+  // If body is a Buffer, convert to string
+  if (Buffer.isBuffer(rawBody)) {
+    rawBody = rawBody.toString('utf8');
+  }
+  
+  // Parse based on content type
+  if (contentType.includes('application/json')) {
+    try {
+      return typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
+    } catch (e) {
+      console.error('JSON parse error:', e);
+      return {};
+    }
+  }
+  
+  if (contentType.includes('application/x-www-form-urlencoded')) {
+    try {
+      const parsed = parseQuery(rawBody);
+      // If there's a 'json' field, parse it (some apps do this)
+      if (parsed.json) {
+        return JSON.parse(parsed.json);
+      }
+      return parsed;
+    } catch (e) {
+      console.error('URL-encoded parse error:', e);
+      return {};
+    }
+  }
+  
+  // Try to parse as JSON anyway (fallback)
+  if (typeof rawBody === 'string') {
+    try {
+      return JSON.parse(rawBody);
+    } catch (e) {
+      console.log('Fallback JSON parse failed, returning raw body');
+      return { raw: rawBody };
+    }
+  }
+  
+  return rawBody || {};
+}
+
 module.exports = async (req, res) => {
-  // Enable CORS
+  // Enable CORS (like Railway's cors middleware)
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   
   // Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
   
-  // LOG INCOMING REQUESTS (ADD THIS)
-  console.log('=== INCOMING REQUEST ===');
-  console.log('Method:', req.method);
-  console.log('Headers:', JSON.stringify(req.headers));
-  console.log('Body:', JSON.stringify(req.body));
-  console.log('======================');
-  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  
-  // ... rest of your code
 
   try {
-    const { model, messages, temperature, max_tokens, stream } = req.body;
+    // Parse body like Express.js
+    const body = await parseRequestBody(req);
+    
+    console.log('=== REQUEST DEBUG ===');
+    console.log('Content-Type:', req.headers['content-type']);
+    console.log('Parsed Body:', JSON.stringify(body).substring(0, 500));
+    console.log('====================');
+    
+    const { model, messages, temperature, max_tokens, stream } = body;
+    
+    // Validate
+    if (!messages || !Array.isArray(messages)) {
+      console.error('Invalid messages:', messages);
+      return res.status(400).json({
+        error: {
+          message: 'Request must include "messages" array',
+          type: 'invalid_request_error',
+          received_body_type: typeof body,
+          received_keys: Object.keys(body || {})
+        }
+      });
+    }
     
     // Smart model selection with fallback
     let nimModel = MODEL_MAPPING[model];
@@ -69,7 +136,7 @@ module.exports = async (req, res) => {
       } catch (e) {}
       
       if (!nimModel) {
-        const modelLower = model.toLowerCase();
+        const modelLower = (model || '').toLowerCase();
         if (modelLower.includes('gpt-4') || modelLower.includes('claude-opus') || modelLower.includes('405b')) {
           nimModel = 'meta/llama-3.1-405b-instruct';
         } else if (modelLower.includes('claude') || modelLower.includes('gemini') || modelLower.includes('70b')) {
