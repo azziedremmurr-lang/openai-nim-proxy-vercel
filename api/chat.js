@@ -34,9 +34,18 @@ module.exports = async (req, res) => {
     return res.status(200).end();
   }
   
+  // LOG INCOMING REQUESTS (ADD THIS)
+  console.log('=== INCOMING REQUEST ===');
+  console.log('Method:', req.method);
+  console.log('Headers:', JSON.stringify(req.headers));
+  console.log('Body:', JSON.stringify(req.body));
+  console.log('======================');
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  
+  // ... rest of your code
 
   try {
     const { model, messages, temperature, max_tokens, stream } = req.body;
